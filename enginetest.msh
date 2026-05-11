@@ -1,0 +1,36 @@
+
+### 4.1 Multi‑branch conditional
+
+set x = 10
+set y = 20
+set z = 30
+
+set result = "A" when x > 5 and y > 15 and z > 25 |
+             "B" when x > 5 and y > 15 |
+             "C" when x > 5 |
+             "D"
+
+writeout("result={result}")
+
+
+### 4.2 Nested arithmetic and logic
+
+
+set result2 = "high"   when (x + y) > 25 and (y * 2) > z |
+              "medium" when (x + y) > 15 or z > 20 |
+              "low"
+
+writeout("result2={result2}")
+
+
+### 4.3 `not`, `and`, `or`
+
+
+set a = 10
+set b = 20
+
+set is_valid = true  when not (a < 0 or b < 0) | false
+set status   = "ok"  when is_valid == true     | "bad"
+
+writeout "is_valid={is_valid}, status={status}"
+

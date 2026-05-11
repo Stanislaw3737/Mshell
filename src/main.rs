@@ -564,7 +564,7 @@ fn execute_intent_with_guard(
     safety_guard.validate_execution(intent, env)?;
     
     // Then proceed with normal execution
-    execute_intent(intent, env, filesystem, library, intent_history_vec, history_manager, engine_manager, printer)
+        execute_intent_with_type(intent, env, filesystem, library, intent_history_vec, history_manager, engine_manager, printer)
 }
 
 fn setup_ctrlc_handler() {
@@ -878,20 +878,7 @@ fn show_help(printer: &Printer) {
     println!("  engine history     - Show propagation history");
     println!("  engine status      - Show engine status");
 
-    printer.subheader("Transaction System (Blacksmithing Metaphor)");
-    println!("  craft [\"name\"]           - Begin crafting changes (start transaction)");
-    println!("  forge                    - Finalize and apply crafted changes (commit)");
-    println!("  smelt                    - Melt down crafted changes (rollback)");
-    println!("  temper                   - Test changes without applying (dry-run)");
-    println!("  inspect                  - View current crafted changes");
-    println!("  anneal <steps>           - Apply changes gradually (staged commit)");
-    println!("  quench                   - Apply changes immediately (fast commit)");
-    println!("  polish                   - Optimize crafted changes before forging");
-    println!("  alloy <id1> <id2>        - Merge multiple crafted changes");
-    println!("  engrave <key> <value>    - Add metadata to crafted changes");
-    println!("  gild <variables...>      - Mark changes as important/golden");
-    println!("  patina <variable>        - Show transaction history for variable");
-    println!("  transaction              - Show current transaction status");
+    // Transaction commands removed: transactions are disabled in this build
 }
 
 fn show_env_clean(env: &Env, printer: &Printer) {
@@ -1041,20 +1028,20 @@ fn execute_intent_in_test_env(
         Verb::EngineRule => execute_engine_rule_intent(intent, engine_manager, printer),
         Verb::EngineHook => execute_engine_hook_intent(intent, engine_manager, printer),
         
-        // Transaction operations
-        Verb::Craft => execute_craft_intent(intent, env, printer),
-        Verb::Forge => execute_forge_intent(env, printer),
-        Verb::Smelt => execute_smelt_intent(env, printer),
-        Verb::Temper => execute_temper_intent(env, printer),
-        Verb::Inspect => execute_inspect_intent(env, printer),
-        Verb::Anneal => execute_anneal_intent(intent, env, printer),
-        Verb::Quench => execute_quench_intent(env, printer),
-        Verb::Polish => execute_polish_intent(intent, env, printer),
-        Verb::Alloy => execute_alloy_intent(intent, env, printer),
-        Verb::Engrave => execute_engrave_intent(intent, env, printer),
-        Verb::Gild => execute_gild_intent(intent, env, printer),
-        Verb::Patina => execute_patina_intent(intent, env, printer),
-        Verb::Transaction => execute_transaction_intent(env, printer),
+        // Transaction operations - disabled
+        Verb::Craft => transactions_disabled_with_intent(intent, env, printer),
+        Verb::Forge => transactions_disabled_no_intent(env, printer),
+        Verb::Smelt => transactions_disabled_no_intent(env, printer),
+        Verb::Temper => transactions_disabled_no_intent(env, printer),
+        Verb::Inspect => transactions_disabled_no_intent(env, printer),
+        Verb::Anneal => transactions_disabled_with_intent(intent, env, printer),
+        Verb::Quench => transactions_disabled_no_intent(env, printer),
+        Verb::Polish => transactions_disabled_with_intent(intent, env, printer),
+        Verb::Alloy => transactions_disabled_with_intent(intent, env, printer),
+        Verb::Engrave => transactions_disabled_with_intent(intent, env, printer),
+        Verb::Gild => transactions_disabled_with_intent(intent, env, printer),
+        Verb::Patina => transactions_disabled_with_intent(intent, env, printer),
+        Verb::Transaction => transactions_disabled_no_intent(env, printer),
         
         Verb::WhatIf => execute_what_if_intent(intent, env, printer),
         
@@ -1143,16 +1130,44 @@ pub fn execute_intent(
     engine_manager: &mut ChangeEngineManager,
     printer: &Printer,
 ) -> Result<String, String> {
-    execute_intent_in_test_env(
-        intent,
-        env,
-        filesystem,
-        library,
-        intent_history_vec,
-        history_manager,
-        engine_manager,
-        printer
-    )
+        execute_intent_in_test_env_with_type(
+            intent,
+            env,
+            filesystem,
+            library,
+            intent_history_vec,
+            history_manager,
+            engine_manager,
+            printer
+        )
+}
+
+// Backwards-compatible wrapper: calls existing execute_intent implementation
+fn execute_intent_with_type(
+    intent: &crate::core::intent::Intent,
+    env: &mut Env,
+    filesystem: &FileSystem,
+    library: &mut Library,
+    intent_history_vec: &mut Vec<crate::core::intent::Intent>,
+    history_manager: &mut HistoryManager,
+    engine_manager: &mut ChangeEngineManager,
+    printer: &Printer,
+) -> Result<String, String> {
+    execute_intent(intent, env, filesystem, library, intent_history_vec, history_manager, engine_manager, printer)
+}
+
+// Backwards-compatible wrapper for test env variant
+fn execute_intent_in_test_env_with_type(
+    intent: &crate::core::intent::Intent,
+    env: &mut Env,
+    filesystem: &FileSystem,
+    library: &mut Library,
+    intent_history_vec: &mut Vec<crate::core::intent::Intent>,
+    history_manager: &mut HistoryManager,
+    engine_manager: &mut ChangeEngineManager,
+    printer: &Printer,
+) -> Result<String, String> {
+    execute_intent_in_test_env(intent, env, filesystem, library, intent_history_vec, history_manager, engine_manager, printer)
 }
 
 fn execute_set_intent_clean(
@@ -1189,7 +1204,7 @@ fn execute_set_intent_clean(
                         Ok(parsed_value) => {
                             if env.has_active_transaction() {
                                 let placeholder = Value::Str("<?>".to_string());
-                                env.set_computed_with_propagation(var_name, placeholder, &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                                env.set_computed_with_type(var_name, placeholder, &expr, declared_type.clone());
                                 let type_info = if let Some(ref t) = declared_type {
                                     format!(":{}", t.name())
                                 } else {
@@ -1204,7 +1219,7 @@ fn execute_set_intent_clean(
                                 }
                                 return Ok(result);
                             } else {
-                                env.set_computed_with_propagation(var_name, parsed_value.clone(), &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                                env.set_computed_with_type(var_name, parsed_value.clone(), &expr, declared_type.clone());
                                 let type_info = if let Some(ref t) = declared_type {
                                     format!(":{}", t.name())
                                 } else {
@@ -1241,7 +1256,7 @@ fn execute_set_intent_clean(
                             // Handle transaction case
                             if env.has_active_transaction() {
                                 let placeholder = Value::Str("<?>".to_string());
-                                env.set_computed_with_propagation(var_name, placeholder, &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                                env.set_computed_with_type(var_name, placeholder, &expr, declared_type.clone());
                                 let type_info = if let Some(ref t) = declared_type {
                                     format!(":{}", t.name())
                                 } else {
@@ -1256,7 +1271,7 @@ fn execute_set_intent_clean(
                                 }
                                 return Ok(result);
                             } else {
-                                env.set_computed_with_propagation(var_name, value.clone(), &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                                env.set_computed_with_type(var_name, value.clone(), &expr, declared_type.clone());
                                 
                                 let propagated = crate::core::propagate::propagate_from(env, var_name)
                                     .unwrap_or_default();
@@ -1302,7 +1317,7 @@ fn execute_set_intent_clean(
             // Check for simple numeric value
             if let Ok(num) = trimmed.parse::<i64>() {
                 let value = Value::Int(num);
-                env.set_direct_with_propagation(var_name, value.clone(), declared_type.clone(), propagation_delay, propagation_limit);
+                env.set_direct_with_type(var_name, value.clone(), declared_type.clone());
                 let type_info = if let Some(ref t) = declared_type {
                     format!(":{}", t.name())
                 } else {
@@ -1321,7 +1336,7 @@ fn execute_set_intent_clean(
             // Check for simple boolean
             if trimmed == "true" || trimmed == "false" {
                 let value = Value::Bool(trimmed == "true");
-                env.set_direct_with_propagation(var_name, value.clone(), declared_type.clone(), propagation_delay, propagation_limit);
+                env.set_direct_with_type(var_name, value.clone(), declared_type.clone());
                 let type_info = if let Some(ref t) = declared_type {
                     format!(":{}", t.name())
                 } else {
@@ -1341,7 +1356,7 @@ fn execute_set_intent_clean(
             if trimmed.starts_with('"') && trimmed.ends_with('"') {
                 let inner = &trimmed[1..trimmed.len()-1];
                 let value = Value::Str(inner.to_string());
-                env.set_direct_with_propagation(var_name, value.clone(), declared_type.clone(), propagation_delay, propagation_limit);
+                env.set_direct_with_type(var_name, value.clone(), declared_type.clone());
                 let type_info = if let Some(ref t) = declared_type {
                     format!(":{}", t.name())
                 } else {
@@ -1362,7 +1377,7 @@ fn execute_set_intent_clean(
                 Ok(expr) => {
                     // During transaction, we store the expression unevaluated
                     let placeholder = Value::Str("<?>".to_string());
-                    env.set_computed_with_propagation(var_name, placeholder, &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                    env.set_computed_with_type(var_name, placeholder, &expr, declared_type.clone());
                     let type_info = if let Some(ref t) = declared_type {
                         format!(":{}", t.name())
                     } else {
@@ -1377,10 +1392,15 @@ fn execute_set_intent_clean(
                     }
                     return Ok(result);
                 }
-                Err(_) => {
+                Err(e) => {
+                    // If the value looks like a method chain, propagate the parse error
+                    if clean_value_str.contains('.') && clean_value_str.contains('(') {
+                        return Err(e);
+                    }
+
                     match parse_simple_value(&clean_value_str, intent.parameters.get("type").map(|s: &String| s.as_str())) {
                         Ok(value) => {
-                            env.set_direct_with_propagation(var_name, value.clone(), declared_type.clone(), propagation_delay, propagation_limit);
+                            env.set_direct_with_type(var_name, value.clone(), declared_type.clone());
                             let type_info = if let Some(ref t) = declared_type {
                                 format!(":{}", t.name())
                             } else {
@@ -1399,7 +1419,7 @@ fn execute_set_intent_clean(
                             // Treat as string literal
                             let expr = crate::core::expr::Expr::Literal(Value::Str(clean_value_str.to_string()));
                             let placeholder = Value::Str("<?>".to_string());
-                            env.set_computed_with_propagation(var_name, placeholder, &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                            env.set_computed_with_type(var_name, placeholder, &expr, declared_type.clone());
                             let type_info = if let Some(ref t) = declared_type {
                                 format!(":{}", t.name())
                             } else {
@@ -1425,7 +1445,7 @@ fn execute_set_intent_clean(
             match parse_interpolated_string(&clean_value_str, env) {
                 Ok(interpolated) => {
                     let value = Value::Str(interpolated.clone());
-                    env.set_direct_with_propagation(var_name, value.clone(), declared_type.clone(), propagation_delay, propagation_limit);
+                    env.set_direct_with_type(var_name, value.clone(), declared_type.clone());
                     
                     let propagated = crate::core::propagate::propagate_from(env, var_name)
                         .unwrap_or_default();
@@ -1462,8 +1482,8 @@ fn execute_set_intent_clean(
                 Ok(expr) => {
                     match crate::core::expr::evaluate(&expr, env) {
                         Ok(value) => {
-                            // Make sure propagation parameters are passed here
-                            env.set_computed_with_propagation(var_name, value.clone(), &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                            // Make sure propagation parameters are passed here (for 'set' we keep non-reactive storage)
+                            env.set_computed_with_type(var_name, value.clone(), &expr, declared_type.clone());
                             
                             let type_info = if let Some(ref t) = declared_type {
                                 format!(":{}", t.name())
@@ -1485,7 +1505,7 @@ fn execute_set_intent_clean(
                         Err(e) => {
                             // Can't evaluate yet - still use propagation control
                             let placeholder = Value::Str("<?>".to_string());
-                            env.set_computed_with_propagation(var_name, placeholder, &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                            env.set_computed_with_type(var_name, placeholder, &expr, declared_type.clone());
                             
                             let type_info = if let Some(ref t) = declared_type {
                                 format!(":{}", t.name())
@@ -1521,7 +1541,7 @@ fn execute_set_intent_clean(
                         let type_hint = intent.parameters.get("type");
                         let final_value = apply_type_hint(value, type_hint.map(|s: &String| s.as_str()))?;
                         
-                        env.set_computed_with_propagation(var_name, final_value.clone(), &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                        env.set_computed_with_type(var_name, final_value.clone(), &expr, declared_type.clone());
                         
                         let propagated = crate::core::propagate::propagate_from(env, var_name)
                             .unwrap_or_default();
@@ -1547,40 +1567,15 @@ fn execute_set_intent_clean(
                         
                         return Ok(output);
                     }
-                    Err(_) => {
-                        // Fall back to simple value
-                        let value = parse_simple_value(&clean_value_str, intent.parameters.get("type").map(|s: &String| s.as_str()))?;
-                        env.set_direct_with_propagation(var_name, value.clone(), declared_type.clone(), propagation_delay, propagation_limit);
-                        
-                        let propagated = crate::core::propagate::propagate_from(env, var_name)
-                            .unwrap_or_default();
-                        
-                        let type_info = if let Some(ref t) = declared_type {
-                            format!(":{}", t.name())
-                        } else {
-                            "".to_string()
-                        };
-                        let mut output = String::new();
-                        output.push_str(&format!("[+] {}{} = {} (direct)", var_name, type_info, value.display()));
-                        if propagation_delay > 0 {
-                            output.push_str(&format!(" (~-{})", propagation_delay));
-                        }
-                        if propagation_limit != usize::MAX {
-                            output.push_str(&format!(" (~+{})", propagation_limit));
-                        }
-                        
-                        if !propagated.is_empty() {
-                            output.push_str(&format!("\n  → Updated: {}", propagated.join(", ")));
-                        }
-                        
-                        return Ok(output);
+                    Err(e) => {
+                        return Err(e);
                     }
                 }
             }
             Err(_) => {
                 // Simple value
                 let value = parse_simple_value(&clean_value_str, intent.parameters.get("type").map(|s: &String| s.as_str()))?;
-                env.set_direct_with_propagation(var_name, value.clone(), declared_type.clone(), propagation_delay, propagation_limit);
+                env.set_direct_with_type(var_name, value.clone(), declared_type.clone());
                 
                 let propagated = crate::core::propagate::propagate_from(env, var_name)
                     .unwrap_or_default();
@@ -2055,44 +2050,69 @@ fn execute_ensure_intent_clean(
 ) -> Result<String, String> {
     match &intent.target {
         Some(Target::Variable(var_name)) => {
-            if let Some(condition) = &intent.condition {
-                let desired_value = parse_simple_value(&condition.right, None)?;
-                
-                let current_val = env.get_value(var_name).cloned();
-                
-                match current_val {
-                    Some(ref current_val) if current_val == &desired_value => {
-                        Ok(format!("[+] Condition already met: {} = {}", var_name, desired_value.display()))
-                    }
-                    Some(current_val) => {
-                        if let Some(var) = env.get_variable(var_name) {
-                            if var.is_constant {
-                                return Err(format!("[-] Cannot change {}: variable is frozen", var_name));
+            // Ensure no longer requires a 'condition' - it's treated as a reactive declaration.
+            // Get propagation controls if specified
+            let propagation_delay = intent.parameters.get("propagation_delay")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(0);
+            let propagation_limit = intent.parameters.get("propagation_limit")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(usize::MAX);
+
+            let declared_type = intent.parameters.get("declared_type")
+                .and_then(|t| parse_simple_type(t));
+
+            let value_str = intent.parameters.get("value")
+                .ok_or("No value specified in ensure intent")?;
+
+            // If value is an expression, register as computed with propagation
+            match crate::core::expr::parse_expression(value_str) {
+                Ok(expr) => {
+                    // Try to evaluate now; if fails, set placeholder via set_computed_with_propagation
+                    match crate::core::expr::evaluate(&expr, env) {
+                        Ok(val) => {
+                            env.set_computed_with_propagation(var_name, val.clone(), &expr, declared_type.clone(), propagation_delay, propagation_limit);
+
+                            let propagated = crate::core::propagate::propagate_from(env, var_name)
+                                .unwrap_or_default();
+
+                            let mut output = String::new();
+                            output.push_str(&format!("[+] Ensured computed: {} = {}", var_name, val.display()));
+                            if !propagated.is_empty() {
+                                output.push_str(&format!("\n  → Updated: {}", propagated.join(", ")));
                             }
+                            Ok(output)
                         }
-                        
-                        env.set_direct(var_name, desired_value.clone());
-                        
-                        let propagated = crate::core::propagate::propagate_from(env, var_name)
-                            .unwrap_or_default();
-                        
-                        let mut output = String::new();
-                        output.push_str(&format!("[+] Enforced condition: {} = {} (was: {})", 
-                            var_name, desired_value.display(), current_val.display()));
-                        
-                        if !propagated.is_empty() {
-                            output.push_str(&format!("\n  → Updated: {}", propagated.join(", ")));
+                        Err(_) => {
+                            // Store as computed with placeholder; propagation will occur when dependencies change
+                            let placeholder = Value::Str("<?>".to_string());
+                            env.set_computed_with_propagation(var_name, placeholder, &expr, declared_type.clone(), propagation_delay, propagation_limit);
+                            Ok(format!("[+] Ensured computed (pending): {} = {}", var_name, expr))
                         }
-                        
-                        Ok(output)
-                    }
-                    None => {
-                        env.set_direct(var_name, desired_value.clone());
-                        Ok(format!("[+] Created variable via condition: {} = {}", var_name, desired_value.display()))
                     }
                 }
-            } else {
-                Err("Ensure intent requires condition".to_string())
+                Err(_) => {
+                    // Not an expression: treat as simple value and register direct with propagation
+                    let desired_value = parse_simple_value(value_str, None)?;
+
+                    if let Some(var) = env.get_variable(var_name) {
+                        if var.is_constant {
+                            return Err(format!("[-] Cannot change {}: variable is frozen", var_name));
+                        }
+                    }
+
+                    env.set_direct_with_propagation(var_name, desired_value.clone(), declared_type.clone(), propagation_delay, propagation_limit);
+
+                    let propagated = crate::core::propagate::propagate_from(env, var_name)
+                        .unwrap_or_default();
+
+                    let mut output = String::new();
+                    output.push_str(&format!("[+] Ensured direct: {} = {}", var_name, desired_value.display()));
+                    if !propagated.is_empty() {
+                        output.push_str(&format!("\n  → Updated: {}", propagated.join(", ")));
+                    }
+                    Ok(output)
+                }
             }
         }
         Some(Target::File(path)) => {
@@ -2384,7 +2404,12 @@ fn parse_simple_value(input: &str, type_hint: Option<&str>) -> Result<crate::cor
             }
         }
         Some(":string") => {
-            Ok(crate::core::types::Value::Str(cleaned.to_string()))
+            // Require explicit double-quoted strings for string type hints
+            if cleaned.len() >= 2 && cleaned.starts_with('"') && cleaned.ends_with('"') {
+                Ok(crate::core::types::Value::Str(cleaned[1..cleaned.len()-1].to_string()))
+            } else {
+                Err(format!("String value must be in double quotes: {}", cleaned))
+            }
         }
         _ => {
             if cleaned == "true" {
@@ -2394,7 +2419,8 @@ fn parse_simple_value(input: &str, type_hint: Option<&str>) -> Result<crate::cor
             } else if let Ok(num) = cleaned.parse::<i64>() {
                 Ok(crate::core::types::Value::Int(num))
             } else {
-                Ok(crate::core::types::Value::Str(cleaned.to_string()))
+                // Do not implicitly accept unquoted strings; require double quotes
+                Err(format!("Unquoted string literals are not allowed: {}. Wrap in double quotes.", cleaned))
             }
         }
     }
@@ -3031,6 +3057,21 @@ fn test_verb_match() {
     
     println!("Test Set match: {}", matches!(&intent1.verb, crate::core::intent::Verb::Set));
     println!("Test EngineStatus match: {}", matches!(&intent2.verb, crate::core::intent::Verb::EngineStatus));
+}
+
+fn transactions_disabled_with_intent(
+    _intent: &crate::core::intent::Intent,
+    _env: &mut Env,
+    _printer: &Printer,
+) -> Result<String, String> {
+    Err("[x] Transactions have been removed from this build".to_string())
+}
+
+fn transactions_disabled_no_intent(
+    _env: &mut Env,
+    _printer: &Printer,
+) -> Result<String, String> {
+    Err("[x] Transactions have been removed from this build".to_string())
 }
 
 fn execute_craft_intent(
@@ -4482,25 +4523,17 @@ fn show_morris_logo(printer: &Printer) {
     print!("\x1B[2J\x1B[1;1H");
     
     if printer.use_color {
-        println!("\x1b[1;38;5;39m"); // Bright professional blue (same as original)
+        println!("\x1b[1;38;5;39m"); // Bright professional blue
     }
     
     println!(r"
         ╔══════════════════════════════════════════╗
         ║                                          ║
-        ║             M O R R I S                  ║
-        ║                                          ║
-        ║    Memory Organization as a Reactive     ║
-        ║    & Recursive Intent-driven System      ║
+        ║             M S H E L L                  ║
         ║                                          ║
         ║    ────────────────────────────────      ║
         ║                                          ║
-        ║    We shape our tools,                   ║
-        ║    and our tools shape us...             ║
-        ║                                          ║
-        ║    ────────────────────────────────      ║
-        ║                                          ║
-        ║    v3.0 • Meta-programmability           ║
+        ║    Conciseness and Elegance              ║
         ║                                          ║
         ╚══════════════════════════════════════════╝
     ");
@@ -4511,6 +4544,5 @@ fn show_morris_logo(printer: &Printer) {
     
     println!();
 }
-
 
 

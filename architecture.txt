@@ -1,0 +1,74 @@
+Morris — Architecture Summary
+=============================
+
+Overview
+--------
+Morris is a single-binary Rust CLI/REPL application providing an intent-driven runtime that stores, computes, and propagates variable values in a reactive environment. It supports user-defined "intents", built-in operations, a dependency-aware propagation engine, and a transactional change system for safe multi-variable updates.
+
+Key components
+--------------
+- Entrypoints & UI
+  - `src/main.rs` — CLI / REPL startup, command loop, intent dispatch, safety checks, and persistence hooks.
+  - `src/repl.rs` — `rustyline`-based line editor with multiline handling and history.
+  - `src/output.rs` — `Printer` for consistent CLI output formatting.
+
+- Core runtime
+  - `src/core/env.rs` — central `Env` holding variables, expressions, dependency maps, and embedded engines (propagation + transaction). Primary API for setting/getting variables, transaction operations, migrations, and queries.
+  - `src/core/types.rs` — `Value`, `Variable`, `SimpleType`, and propagation metadata (delay/limit counters and helpers).
+  - `src/core/expr.rs` — expression AST, parser, evaluator, and `extract_variables` for dependency discovery.
+  - `src/core/builtins.rs` — functions available to expressions (string/list/dict/JSON utilities and JsonPath support).
+
+- Propagation
+  - Legacy path: `src/core/propagate.rs` — procedural BFS/queue propagation that evaluates dependent expressions and updates variables directly.
+  - Enhanced engine: `src/core/propagation/engine.rs` — graph-backed `PropagationEngine` with a `PropagationGraph`, evaluation environment creation, strategies (Immediate, Debounced, Batched), propagation history, and prioritized update logic. `Env` can `migrate_to_new_engine()` and call `propagate_from_enhanced()`.
+  - Variables have per-variable propagation controls: `~ - N` (delay ignoring first N propagations) and `~ + N` (become immune after N propagations) implemented on `Variable` in `types.rs`.
+
+- Transactions / Change Engine
+  - `src/core/transaction/engine.rs` — `TransactionEngine` manages `craft`/`forge`/`smelt` semantics, snapshots, temper (preview/analysis), anneal/quench for staged or fast commits, and a `what_if` simulation. It builds evaluation order via topological sorting to safely apply computed changes.
+  - `Env` integrates transaction logic: while a transaction is active changes are recorded (placeholders), and `forge` applies direct values then computes expressions in order, rolling back to the snapshot on failure.
+
+- Intents & Execution
+  - Intents are parsed into `Intent` structs (see `src/core/intent` modules). The main loop (`main.rs`) parses user input into intents, runs safety checks (`safety_guard` / `startup_validator`), tracks history (`HistoryManager`), and dispatches verbs to handlers implemented largely in `main.rs`.
+  - Many verbs exist: `set`, `ensure`, file ops (save/read/write), navigation/book library, change-engine verbs, and transaction verbs (craft/forge/temper/etc.).
+
+- Library & Safety
+  - `src/core/library_manager.rs` — manages system and user intent files under the user home (e.g., `~/.morris`), integrity database, and validated loading of intent definitions.
+  - Startup validation runs early to ensure system integrity; `SafetyGuard` validates intents/executions at runtime.
+
+Data flow (high-level)
+----------------------
+1. Input (REPL or `.msh` script) → parsed to `Intent`.
+2. `SafetyGuard` and `StartupValidator` run checks.
+3. Intent execution handlers call `Env` API to set direct or computed values, or to start/modify transactions.
+4. On variable changes:
+   - If `use_new_engine` is enabled, `Env` delegates to `PropagationEngine.set_variable()`, which computes affected nodes (topological order) and returns results; `Env` applies values to `Variable` instances.
+   - Otherwise, legacy `propagate_from()` traverses dependents, evaluates expressions via `expr::evaluate`, and updates `Env` directly.
+5. Transactions record changes and snapshots; `forge` computes safe evaluation order and commits atomically (or rolls back on failures).
+
+Design notes & trade-offs
+------------------------
+- Dual propagation paths (legacy procedural + graph engine) allow progressive rollout but add maintenance overhead.
+- Transactions use snapshots + topological ordering for safety; correctness depends on accurate dependency extraction from expressions.
+- Many execution handlers live in `main.rs`, making it the central dispatcher; good for quick iteration, but could be refactored into smaller modules for clarity.
+- Per-variable propagation controls provide fine-grained tuning for noisy or stable values.
+
+Where to look (quick links)
+--------------------------
+- Entrypoint & CLI: src/main.rs
+- REPL: src/repl.rs
+- Core runtime & Env: src/core/env.rs
+- Types: src/core/types.rs
+- Expression parsing/eval: src/core/expr.rs
+- Legacy propagation: src/core/propagate.rs
+- Enhanced propagation engine: src/core/propagation/engine.rs
+- Transaction engine: src/core/transaction/engine.rs
+- Builtins: src/core/builtins.rs
+- Library management: src/core/library_manager.rs
+
+Next steps (suggestions)
+-----------------------
+- Generate a component diagram (mermaid) showing Env, PropagationEngine, TransactionEngine, REPL, and LibraryManager.
+- Run `cargo build` to verify current compile status and fix any type or API mismatches.
+- Refactor heavy `main.rs` intent handlers into per-verb modules for maintainability.
+
+This file was generated from a code scan of the repository to provide a concise developer-focused architecture overview.

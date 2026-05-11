@@ -235,7 +235,7 @@ fn parse_token(token: &str) -> Expr {
         
         for ch in args_str.chars() {
             match ch {
-                '"' | '\'' => {
+                '"' => {
                     if !in_quotes {
                         in_quotes = true;
                         quote_char = ch;
@@ -328,7 +328,7 @@ fn parse_method_call(token: &str) -> Expr {
     
     for (i, ch) in token.chars().enumerate() {
         match ch {
-            '"' | '\'' => {
+            '"' => {
                 if !in_quotes {
                     in_quotes = true;
                     quote_char = ch;
@@ -352,28 +352,107 @@ fn parse_method_call(token: &str) -> Expr {
     
     if let Some(dot_pos) = dot_pos {
         let obj_name = &token[..dot_pos];
-        let method_and_args = &token[dot_pos + 1..];
-        
-        // Find opening parenthesis
-        if let Some(paren_pos) = method_and_args.find('(') {
-            if method_and_args.ends_with(')') {
-                let method_name = &method_and_args[..paren_pos];
-                let args_str = &method_and_args[paren_pos + 1..method_and_args.len() - 1];
-                
-                // Parse arguments
-                let mut args = Vec::new();
-                if !args_str.trim().is_empty() {
-                    // Split arguments by comma, respecting nesting
-                    let arg_parts = split_arguments_respecting_nesting(args_str);
-                    for arg_part in arg_parts {
-                        args.push(parse_token(arg_part.trim()));
+        let mut remainder = &token[dot_pos + 1..];
+
+        let mut current_expr = parse_token(obj_name);
+
+        // Parse a chain of .method(args).method2(args)... from remainder
+        loop {
+            // remainder should start with methodName(...)
+            // find the first '(' not in quotes
+            let mut paren_pos = None;
+            let mut in_quotes = false;
+            let mut quote_char = '"';
+            for (i, ch) in remainder.char_indices() {
+                match ch {
+                    '"' => {
+                        if !in_quotes {
+                            in_quotes = true;
+                            quote_char = ch;
+                        } else if ch == quote_char {
+                            in_quotes = false;
+                        }
                     }
+                    '(' if !in_quotes => {
+                        paren_pos = Some(i);
+                        break;
+                    }
+                    _ => {}
                 }
-                
-                let obj_expr = parse_token(obj_name);
-                return Expr::MethodCall(Box::new(obj_expr), method_name.to_string(), args);
+            }
+
+            if paren_pos.is_none() {
+                // Not a method call we can parse
+                break;
+            }
+
+            let paren_pos = paren_pos.unwrap();
+            let method_name = &remainder[..paren_pos];
+
+            // Find matching closing parenthesis for this method call
+            let mut depth = 0isize;
+            let mut in_quotes = false;
+            let mut quote_char = '"';
+            let mut end_pos = None;
+            for (i, ch) in remainder.char_indices().skip(paren_pos) {
+                match ch {
+                    '"' => {
+                        if !in_quotes {
+                            in_quotes = true;
+                            quote_char = ch;
+                        } else if ch == quote_char {
+                            in_quotes = false;
+                        }
+                    }
+                    '(' if !in_quotes => depth += 1,
+                    ')' if !in_quotes => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end_pos = Some(i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if end_pos.is_none() {
+                break;
+            }
+
+            let end_pos = end_pos.unwrap();
+            let args_str = &remainder[paren_pos + 1..end_pos];
+
+            // Parse arguments
+            let mut args = Vec::new();
+            if !args_str.trim().is_empty() {
+                let arg_parts = split_arguments_respecting_nesting(args_str);
+                for arg_part in arg_parts {
+                    args.push(parse_token(arg_part.trim()));
+                }
+            }
+
+            // Build new MethodCall expr
+            current_expr = Expr::MethodCall(Box::new(current_expr), method_name.to_string(), args);
+
+            // Move remainder forward past this method call
+            if end_pos + 1 >= remainder.len() {
+                // no more text
+                remainder = "";
+                break;
+            } else {
+                remainder = &remainder[end_pos + 1..];
+                // if next char is '.', skip it and continue; otherwise stop
+                if remainder.starts_with('.') {
+                    remainder = &remainder[1..];
+                    continue;
+                } else {
+                    break;
+                }
             }
         }
+
+        return current_expr;
     }
     
     Expr::Variable(token.to_string())
@@ -389,7 +468,7 @@ fn split_arguments_respecting_nesting(s: &str) -> Vec<String> {
     
     for ch in s.chars() {
         match ch {
-            '"' | '\'' => {
+            '"' => {
                 if !in_quotes {
                     in_quotes = true;
                     quote_char = ch;
@@ -896,8 +975,92 @@ pub fn parse_expression(input: &str) -> Result<Expr, String> {
     if trimmed.is_empty() {
         return Err("Empty expression".to_string());
     }
-    
+    // If expression contains dot-chaining, validate its syntax so that
+    // malformed chains (e.g. missing parentheses) produce an error
+    // instead of being silently treated as a string.
+    if trimmed.contains('.') && trimmed.contains('(') {
+        validate_method_chain_syntax(trimmed)?;
+    }
+
     parse_expr_with_precedence(trimmed)
+}
+
+fn validate_method_chain_syntax(s: &str) -> Result<(), String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0usize;
+    let mut paren_depth = 0i32;
+    let mut in_quotes = false;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            i += 1;
+            continue;
+        }
+
+        if in_quotes {
+            i += 1;
+            continue;
+        }
+
+        if ch == '(' {
+            paren_depth += 1;
+            i += 1;
+            continue;
+        }
+        if ch == ')' {
+            if paren_depth > 0 { paren_depth -= 1; }
+            i += 1;
+            continue;
+        }
+
+        if ch == '.' && paren_depth == 0 {
+            // Found a top-level dot; ensure a method name and '(' follow
+            let mut j = i + 1;
+            // skip whitespace
+            while j < chars.len() && chars[j].is_whitespace() { j += 1; }
+            if j >= chars.len() {
+                return Err(format!("Syntax error: incomplete method chain after '.' at pos {}", i));
+            }
+            // method name: must start with letter or underscore
+            if !(chars[j].is_alphabetic() || chars[j] == '_') {
+                return Err(format!("Syntax error: invalid method name start '{}' at pos {}", chars[j], j));
+            }
+            // consume method name
+            while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') { j += 1; }
+            // skip whitespace
+            while j < chars.len() && chars[j].is_whitespace() { j += 1; }
+            if j >= chars.len() || chars[j] != '(' {
+                return Err(format!("Syntax error: expected '(' after method name at pos {}", j));
+            }
+            // find matching closing paren
+            let mut depth = 0i32;
+            let mut k = j;
+            let mut in_q = false;
+            while k < chars.len() {
+                let c = chars[k];
+                if c == '"' { in_q = !in_q; k += 1; continue; }
+                if in_q { k += 1; continue; }
+                if c == '(' { depth += 1; }
+                if c == ')' {
+                    depth -= 1;
+                    if depth == 0 { break; }
+                }
+                k += 1;
+            }
+            if k >= chars.len() || chars[k] != ')' {
+                return Err(format!("Syntax error: unmatched '(' for method starting at pos {}", j));
+            }
+            // move i past this method call
+            i = k + 1;
+            continue;
+        }
+
+        i += 1;
+    }
+
+    Ok(())
 }
 
 pub fn evaluate(expr: &Expr, env: &Env) -> Result<Value, String> {
@@ -1257,14 +1420,41 @@ pub fn evaluate(expr: &Expr, env: &Env) -> Result<Value, String> {
             }
         }
         Expr::MethodCall(obj_expr, method_name, args) => {
-            let obj = evaluate(obj_expr, env)?;
-            
-            // Evaluate all arguments first
+            // Evaluate arguments for this method (expect's arg is typically a message)
             let mut evaluated_args = Vec::new();
             for arg in args {
                 evaluated_args.push(evaluate(arg, env)?);
             }
-            
+
+            // Special-case `.expect(...)`: it should catch errors from the inner expression
+            if method_name == "expect" {
+                // Evaluate the inner expression but DO NOT propagate its error immediately;
+                // instead return a controlled error message if it failed.
+                match evaluate(obj_expr, env) {
+                    Ok(v) => return Ok(v),
+                    Err(_inner_err) => {
+                        // If a message string was provided, use it directly
+                        if let Some(Value::Str(msg)) = evaluated_args.get(0) {
+                            return Err(msg.clone());
+                        }
+
+                        // Otherwise compute a default message indicating which dot-function position failed.
+                        fn count_methods(expr: &Expr) -> usize {
+                            match expr {
+                                Expr::MethodCall(inner, _m, _args) => 1 + count_methods(inner),
+                                _ => 0,
+                            }
+                        }
+
+                        let method_pos = count_methods(&*obj_expr);
+                        return Err(format!("Failed at function {}", method_pos));
+                    }
+                }
+            }
+
+            // For all other methods, evaluate the object and proceed as before
+            let obj = evaluate(obj_expr, env)?;
+
             // Clone obj once for use in match to avoid borrowing issues
             match (obj.clone(), method_name.as_str()) {  // Clone here
                 // String methods
@@ -1376,6 +1566,23 @@ pub fn evaluate(expr: &Expr, env: &Env) -> Result<Value, String> {
                         Err("List get() requires integer index".to_string())
                     }
                 },
+                (Value::List(items), "contains") if !evaluated_args.is_empty() => {
+                    Ok(Value::Bool(items.contains(&evaluated_args[0].clone())))
+                },
+                (Value::List(items), "sort") => {
+                    crate::core::builtins::sort(&Value::List(items.clone()))
+                },
+                (Value::List(items), "sort_with_direction") if !evaluated_args.is_empty() => {
+                    crate::core::builtins::sort_with_direction(&Value::List(items.clone()), &evaluated_args[0])
+                },
+                (Value::List(items), "filter") if !evaluated_args.is_empty() => {
+                    // filter expects a condition expression string
+                    if let Value::Str(cond) = &evaluated_args[0] {
+                        crate::core::builtins::filter(&Value::List(items.clone()), cond, env)
+                    } else {
+                        Err("filter() requires string condition".to_string())
+                    }
+                },
                 
                 // Dict methods
                 (Value::Dict(map), "get") if !evaluated_args.is_empty() => {
@@ -1396,6 +1603,64 @@ pub fn evaluate(expr: &Expr, env: &Env) -> Result<Value, String> {
                     } else {
                         Err("Dict set() requires string key".to_string())
                     }
+                },
+                (Value::Dict(map), "has_key") if !evaluated_args.is_empty() => {
+                    if let Value::Str(key) = &evaluated_args[0] {
+                        Ok(Value::Bool(map.contains_key(key)))
+                    } else {
+                        Err("has_key() requires string key".to_string())
+                    }
+                },
+                (Value::Dict(mut map), "remove") if !evaluated_args.is_empty() => {
+                    if let Value::Str(key) = &evaluated_args[0] {
+                        map.remove(key);
+                        Ok(Value::Dict(map))
+                    } else {
+                        Err("remove() requires string key".to_string())
+                    }
+                },
+                (Value::Dict(map1), "merge") if !evaluated_args.is_empty() => {
+                    if let Value::Dict(map2) = &evaluated_args[0] {
+                        let mut merged = map1.clone();
+                        for (k, v) in map2 {
+                            merged.insert(k.clone(), v.clone());
+                        }
+                        Ok(Value::Dict(merged))
+                    } else {
+                        Err("merge() requires a dictionary argument".to_string())
+                    }
+                },
+                
+                // String methods continued
+                (Value::Str(s), "split") if !evaluated_args.is_empty() => {
+                    crate::core::builtins::split(&Value::Str(s.clone()), &evaluated_args[0])
+                },
+                (Value::Str(s), "find_index") if !evaluated_args.is_empty() => {
+                    crate::core::builtins::find_index(&Value::Str(s.clone()), &evaluated_args[0])
+                },
+                (Value::Str(s), "starts_with") if !evaluated_args.is_empty() => {
+                    crate::core::builtins::starts_with(&Value::Str(s.clone()), &evaluated_args[0])
+                },
+                (Value::Str(s), "ends_with") if !evaluated_args.is_empty() => {
+                    crate::core::builtins::ends_with(&Value::Str(s.clone()), &evaluated_args[0])
+                },
+                (Value::Str(s), "char_at") if !evaluated_args.is_empty() => {
+                    crate::core::builtins::char_at(&Value::Str(s.clone()), &evaluated_args[0])
+                },
+                (Value::Str(s), "substring") if evaluated_args.len() >= 2 => {
+                    crate::core::builtins::substring(&Value::Str(s.clone()), &evaluated_args[0], &evaluated_args[1])
+                },
+                (Value::Str(s), "substring_index") if evaluated_args.len() >= 2 => {
+                    crate::core::builtins::substring_index(&Value::Str(s.clone()), &evaluated_args[0], &evaluated_args[1])
+                },
+                (Value::Str(s), "replace_at") if evaluated_args.len() >= 3 => {
+                    crate::core::builtins::replace_at(&Value::Str(s.clone()), &evaluated_args[0], &evaluated_args[1], &evaluated_args[2])
+                },
+                (Value::Str(s), "replace") if evaluated_args.len() >= 2 => {
+                    crate::core::builtins::replace(&Value::Str(s.clone()), &evaluated_args[0], &evaluated_args[1])
+                },
+                (Value::List(items), "join") if !evaluated_args.is_empty() => {
+                    crate::core::builtins::join(&Value::List(items.clone()), &evaluated_args[0])
                 },
                 
                 // Add more method implementations as needed
@@ -2286,4 +2551,25 @@ pub fn parse_propagation_suffix(input: &str) -> Result<(String, usize, usize), S
     let result = (input.to_string(), 0, usize::MAX);
      
     Ok(result) // No delay, no limit
+}
+
+#[cfg(test)]
+mod method_chain_tests {
+    use super::*;
+    use crate::core::env::Env;
+    use crate::core::types::Value;
+    use std::collections::HashMap;
+
+    #[test]
+    fn dict_keys_len_chain() {
+        let mut env = Env::new();
+        let mut map = HashMap::new();
+        map.insert("a".to_string(), Value::Int(1));
+        map.insert("b".to_string(), Value::Int(2));
+        env.set_direct("d", Value::Dict(map));
+
+        let expr = parse_expression("d.keys().len()").expect("parse expression");
+        let val = evaluate(&expr, &env).expect("evaluate");
+        assert_eq!(val, Value::Int(2));
+    }
 }

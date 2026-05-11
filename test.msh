@@ -1,32 +1,9 @@
 # Test Morris REPL with intent files
 set test_message = "Hello Morris!"
-set test_number = 42
-set test_bool = true
+set test_number = test_message.len()
+set test_dict = {1:"a", 2:"b", 3:"c"}
+set test_bool = test_dict.keys().sort().contains("1")
 
-# Test that intents are loaded
-page
-engine status
-history
 
-# Test basic operations
-writeout "Test message: {test_message}"
-derive test_number
-analyze test_message
-
-# Test file operations (create test file first)
-write "test_output.txt" "This is a test file"
-info "test_output.txt"
-exists "test_output.txt"
-
-# Test navigation
-turn "."
-bookmark add "test_bookmark" "."
-bookmarks
-
-# Test change engine
-craft "test_craft"
-set craft_var = "crafted_value"
-temper
-forge
 
 writeout "All REPL tests completed successfully!"

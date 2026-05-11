@@ -524,11 +524,7 @@ impl Env {
                 .insert(name.to_string());
         }
         
-        if self.use_new_engine {
-            if let Err(e) = self.propagation_engine.register_computed_variable(name, value.clone(), expr) {
-                eprintln!("Warning: Failed to register with new propagation engine: {:?}", e);
-            }
-        }
+        // Propagation should be triggered by the caller to avoid double-invocation.
     }
 
     // Similarly fix set_direct_with_type:
@@ -581,11 +577,7 @@ impl Env {
         
         self.expressions.remove(name);
         
-        if self.use_new_engine {
-            if let Err(e) = self.propagation_engine.register_direct_variable(name, value.clone(), false) {
-                eprintln!("Warning: Failed to register direct variable: {:?}", e);
-            }
-        }
+        // Intentionally do not call into `propagation_engine` here for `set`.
     }
 
     // Convenience methods for backward compatibility
@@ -1027,10 +1019,15 @@ impl Env {
         
         self.expressions.remove(name);
         
+        // Propagation should be triggered by the caller to avoid double-invocation.
+    }
+
+    // Public helper: propagate from a changed variable using the active engine.
+    pub fn propagate_from_env(&mut self, changed_var: &str) -> Result<Vec<String>, String> {
         if self.use_new_engine {
-            if let Err(e) = self.propagation_engine.register_direct_variable(name, value.clone(), false) {
-                eprintln!("Warning: Failed to register direct variable: {:?}", e);
-            }
+            self.propagate_from_enhanced(changed_var)
+        } else {
+            self.propagate_from_legacy(changed_var)
         }
     }
     

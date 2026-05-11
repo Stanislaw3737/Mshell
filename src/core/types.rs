@@ -109,7 +109,9 @@ impl Variable {
         source: VariableSource,
         declared_type: Option<SimpleType>,
     ) -> Self {
-        Self::new_with_propagation(value, is_constant, expression, source, declared_type, 0, usize::MAX)
+        // Default for `set` (non-reactive) should disable propagation by setting limit=0.
+        // `ensure` uses `new_with_propagation` to enable propagation with explicit parameters.
+        Self::new_with_propagation(value, is_constant, expression, source, declared_type, 0, 0)
     }
     
     // Keep existing constructor for backward compatibility
@@ -134,28 +136,22 @@ impl Variable {
     pub fn should_propagate(&mut self) -> bool {
         // Constants never propagate
         if self.is_constant {
-            println!("DEBUG: Variable is constant, propagation blocked");
             return false;
         }
         
         // Handle delay (~-N: ignore first N changes)
         if self.delay_counter < self.propagation_delay {
             self.delay_counter += 1;
-            println!("DEBUG: Variable propagation delayed ({}/{})", self.delay_counter, self.propagation_delay);
             return false;
         }
         
         // Handle limit (~+N: become immune after N changes)
         if self.propagation_limit != usize::MAX && self.limit_counter >= self.propagation_limit {
-            println!("DEBUG: Variable propagation immune ({}/{})", self.limit_counter, self.propagation_limit);
             return false;
         }
         
         // Increment propagation counter and allow propagation
         self.limit_counter += 1;
-        println!("DEBUG: Variable propagation allowed (delay: {}/{}, limit: {}/{})", 
-            self.delay_counter, self.propagation_delay,
-            self.limit_counter, self.propagation_limit);
         true
     }
     

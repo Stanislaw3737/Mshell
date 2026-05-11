@@ -1,0 +1,19 @@
+Key technologies used in morris-code
+
+- Language: Rust
+- Build: Cargo (Rust package manager)
+- Serialization: serde, serde_json
+- Time handling: chrono
+- UUIDs: uuid
+- Graph/propagation: petgraph
+- REPL/CLI: rustyline
+- Hashing: sha2
+- Filesystem helpers: dirs, shellexpand
+- Persistence: JSON files in `~/.morris` (history.json, change_engine.json) and environment JSON files
+- Atomic file writes: write to temp file then rename
+- Testing / examples: files under `examples/` and `src/test_*.rs`
+- Concurrency/ctrl: ctrlc (signal handling)
+
+Notes:
+- Core modules: `src/core` (env, intent, transaction, propagation, change_engine)
+- CLI entrypoints: `src/main.rs`, `src/repl.rs`

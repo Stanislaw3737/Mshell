@@ -406,12 +406,32 @@ fn parse_ensure_intent(input: &str) -> Result<Intent, String> {
     if content.contains('=') {
         let parts: Vec<&str> = content.splitn(2, '=').map(|s| s.trim()).collect();
         if parts.len() == 2 && !parts[0].is_empty() {
-            let var_name = parts[0];
-            let value = parts[1];
-            
-            return Ok(Intent::new(Verb::Ensure)
-                .with_target(Target::Variable(var_name.to_string()))
-                .with_parameter("value", value));
+            let var_part = parts[0];
+            let value_part = parts[1];
+
+            // Parse propagation suffix from the VALUE part
+            let (clean_value_part, delay, limit) = crate::core::expr::parse_propagation_suffix(value_part)?;
+
+            // Parse variable with optional type
+            let (var_name, declared_type) = parse_variable_with_type(var_part)?;
+
+            let mut intent = Intent::new(Verb::Ensure)
+                .with_target(Target::Variable(var_name));
+
+            intent = intent.with_parameter("value", &clean_value_part);
+
+            if let Some(t) = declared_type {
+                intent = intent.with_parameter("declared_type", t.name());
+            }
+
+            if delay > 0 {
+                intent = intent.with_parameter("propagation_delay", &delay.to_string());
+            }
+            if limit != usize::MAX {
+                intent = intent.with_parameter("propagation_limit", &limit.to_string());
+            }
+
+            return Ok(intent);
         }
     }
     
